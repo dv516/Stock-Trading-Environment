@@ -46,6 +46,7 @@ config = {
         "T": {None: T_set},
         # "demand_type": {None: 'deterministic'},
         "demand_type": {None: 'random'},
+        "backoff": {None: 0.4},
         "rho": {None: 1e6},
         "rho_inc": {None: 1},
         # Initial storage
@@ -141,6 +142,7 @@ class SC_base(gym.Env):
         self.cumulative_res_viol = 0
         self.cumulative_istar_constr = 0
 
+        self.backoff = config['backoff'][None]
         self.penalty_cost = config['rho'][None]
         self.penalty_inc = config['rho_inc'][None]
 
@@ -313,6 +315,28 @@ class SC_base(gym.Env):
             [self.price[self.products[i]]*self.dummy_sales[i] for i in range(P_len)]
         )
 
+        res_viol_backoff = sum(
+            max(0, 
+                self.time_per_res[l,r]* sum(
+                    action[-6+i]*self.product_at_loc[l, self.products[i]]*self.Q[self.products[i]] for i in range(P_len)
+                )/self.res_avail[l, r] - (1-self.backoff)
+            )**2 for l in self.locations for r in self.resources
+        ) # / len(self.locations) / len(self.resources)
+
+        prod_UL = sum(
+            max(0, action[-6+i] - 500e3)**2 for i in range(P_len)
+        ) + max(0, action[0] - 500e3)**2 + max(0, action[1] - 500e3)**2
+        
+        if self.time > 4:
+            istar_constr_backoff = sum(
+                [max((1-self.backoff) - self.states[i]/self.safe_storage[materials[i]], 0)**2 for i in range(M_len)]
+            )
+        else:
+            istar_constr_backoff = sum(
+                [max((1-self.backoff)/4 - self.states[i]/self.safe_storage[materials[i]], 0)**2 for i in range(M_len)]
+            )
+
+
         res_viol = sum(
             max(0, 
                 self.time_per_res[l,r]* sum(
@@ -321,10 +345,6 @@ class SC_base(gym.Env):
             )**2 for l in self.locations for r in self.resources
         ) # / len(self.locations) / len(self.resources)
 
-        prod_UL = sum(
-            max(0, action[-6+i] - 500e3)**2 for i in range(P_len)
-        ) + max(0, action[0] - 500e3)**2 + max(0, action[1] - 500e3)**2
-        
         if self.time > 4:
             istar_constr = sum(
                 [max(1 - self.states[i]/self.safe_storage[materials[i]], 0)**2 for i in range(M_len)]
@@ -335,7 +355,7 @@ class SC_base(gym.Env):
             )
 
 
-        self.penalty = (res_viol + prod_UL + istar_constr)
+        self.penalty = (res_viol_backoff + prod_UL + istar_constr_backoff)
         # dummy1 = min(self.penalty, 100000)
         # dummy2 = max(0, self.penalty - 100000)
         dummy1 = min(self.penalty, 10)
